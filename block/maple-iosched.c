@@ -1,15 +1,15 @@
 /*
  * Maple I/O Scheduler
- * Based on Zen and SIO.
+ * Based on Zen and TripNDroid.
  *
- * Copyright (C) 2016 Joe Maples <joe@frap129.org>
- *           (C) 2012 Brandon Berhent <bbedward@gmail.com
- *           (C) 2012 Miguel Boton <mboton@gmail.com>
+ * Copyright (C) 2012 Brandon Berhent <bbedward@gmail.com>
+ *           (C) 2014 LoungeKatt <twistedumbrella@gmail.com>
+ *				 2015 Fixes to stop crashing on 3.10 by Matthew Alex <matthewalex@outlook.com>
+ *           (C) 2016 Joe Maples <joe@frap129.org>
  *
- * Maple uses a first come first serve style algorithm with seperated read/write
- * handling to allow for read biases. By prioritizing reads, simple tasks should improve
- * in performance. Maple also uses hooks for the powersuspend driver to increase
- * expirations when power is suspended to decrease workload.
+ * Maple uses Zen's first come first serve style algorithm with seperated read/write
+ * expiry to allow for read biases. By prioritizing reads, simple tasks should improve
+ * in performance.
  */
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
@@ -21,11 +21,14 @@
 #include <linux/powersuspend.h>
 #endif
 
-#define MAPLE_IOSCHED_PATCHLEVEL	(8)
 
-enum { ASYNC, SYNC };
 
 /* Tunables */
+
+#define MAPLE_IOSCHED_PATCHLEVEL	(2)
+
+enum maple_sync { ASYNC, SYNC };
+
 static const int sync_read_expire = 150;	/* max time before a read sync is submitted. */
 static const int sync_write_expire = 150;	/* max time before a write sync is submitted. */
 static const int async_read_expire = 900;	/* ditto for read async, these limits are SOFT! */
@@ -40,7 +43,7 @@ struct maple_data {
 	struct list_head fifo_list[2][2];
 
 	/* Attributes */
-	unsigned int batched;
+        unsigned int batching;          /* number of sequential requests made */
 	unsigned int starved;
 
 	/* Settings */
@@ -86,15 +89,15 @@ maple_add_request(struct request_queue *q, struct request *rq)
 	 * expire time.
 	 */
 #ifdef CONFIG_POWERSUSPEND
-   	/* inrease expiration when device is asleep */
-   	unsigned int fifo_expire_suspended = mdata->fifo_expire[sync][dir] * sleep_latency_multiple;
-   	if (!power_suspended && mdata->fifo_expire[sync][dir]) {
-   		rq->fifo_time = jiffies + mdata->fifo_expire[sync][dir];
-   		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
-   	} else if (power_suspended && fifo_expire_suspended) {
-		rq->fifo_time = jiffies + mdata->fifo_expire[sync][dir];
-   		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
-   	}
+	/* inrease expiration when device is asleep */
+	unsigned int fifo_expire_suspended = mdata->fifo_expire[sync][dir] * sleep_latency_multiple;
+	if (!power_suspended && mdata->fifo_expire[sync][dir]) {
+		rq_set_fifo_time(rq, jiffies + mdata->fifo_expire[sync][dir]);
+		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
+	} else if (power_suspended && fifo_expire_suspended) {
+		rq_set_fifo_time(rq, jiffies + fifo_expire_suspended);
+		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
+	}
 #else
    	if (mdata->fifo_expire[sync][dir]) {
    		rq_set_fifo_time(rq, jiffies + mdata->fifo_expire[sync][dir]);
@@ -163,48 +166,46 @@ maple_choose_expired_request(struct maple_data *mdata)
 static struct request *
 maple_choose_request(struct maple_data *mdata, int data_dir)
 {
-	struct list_head *sync = mdata->fifo_list[SYNC];
-	struct list_head *async = mdata->fifo_list[ASYNC];
+        struct request *rq_sync_read = maple_expired_request(mdata, SYNC, READ);
+	struct request *rq_sync_write = maple_expired_request(mdata, SYNC, WRITE);
+        struct request *rq_async_read = maple_expired_request(mdata, ASYNC, READ);
+	struct request *rq_async_write = maple_expired_request(mdata, ASYNC, WRITE);
 
-	/* Increase (non-expired-)batch-counter */
-	mdata->batched++;
+        if (rq_async_read && rq_sync_read) {
+        	if (time_after(rq_fifo_time(rq_async_read), rq_fifo_time(rq_async_read)))
+                	return rq_sync_read;
+        } else if (rq_sync_read) {
+                return rq_sync_read;
+	} else if (rq_async_read) {
+		return rq_async_read;
+	}
 
+	if (rq_async_write && rq_sync_write) {
+		if (time_after(rq_fifo_time(rq_async_write), rq_fifo_time(rq_sync_write)))
+			return rq_sync_write;
+	} else if (rq_sync_write) {
+		return rq_sync_write;
+	} else if (rq_async_write) {
+		return rq_async_write;
+	}
 
-	/*
-	 * Retrieve request from available fifo list.
-	 * Asynchronous requests have priority over synchronous.
-	 * Read requests have priority over write.
-	 */
-	if (!list_empty(&async[data_dir]))
-		return rq_entry_fifo(async[data_dir].next);
-	if (!list_empty(&sync[data_dir]))
-		return rq_entry_fifo(sync[data_dir].next);
-
-	if (!list_empty(&async[!data_dir]))
-			return rq_entry_fifo(async[!data_dir].next);
-	if (!list_empty(&sync[!data_dir]))
-		return rq_entry_fifo(sync[!data_dir].next);
-
-	return NULL;
+        return 0;
 }
 
 static inline void
 maple_dispatch_request(struct maple_data *mdata, struct request *rq)
 {
-	/*
-	 * Remove the request from the fifo list
-	 * and dispatch it.
-	 */
-	rq_fifo_clear(rq);
-	elv_dispatch_add_tail(rq->q, rq);
+        /*
+         * Retrieve request from available fifo list.
+         * Synchronous requests have priority over asynchronous.
+	 * Read requests have priority over writes.
+         */
+	if (!list_empty(&mdata->fifo_list[SYNC][rqtype]))
+               	return rq_entry_fifo(mdata->fifo_list[SYNC][rqtype].next);
+       	if (!list_empty(&mdata->fifo_list[ASYNC][rqtype]))
+               	return rq_entry_fifo(mdata->fifo_list[ASYNC][rqtype].next);
 
-	if (rq_data_dir(rq)) {
-		mdata->starved = 0;
-	} else {
-		if (!list_empty(&mdata->fifo_list[SYNC][WRITE]) ||
-				!list_empty(&mdata->fifo_list[ASYNC][WRITE]))
-			mdata->starved++;
-	}
+        return NULL;
 }
 
 static int
@@ -388,14 +389,14 @@ STORE_FUNCTION(maple_sleep_latency_multiple_store, &mdata->sleep_latency_multipl
 				      maple_##name##_store)
 
 static struct elv_fs_entry maple_attrs[] = {
-	DD_ATTR(sync_read_expire),
+        DD_ATTR(sync_read_expire),
 	DD_ATTR(sync_write_expire),
-	DD_ATTR(async_read_expire),
+        DD_ATTR(async_read_expire),
 	DD_ATTR(async_write_expire),
-	DD_ATTR(fifo_batch),
+        DD_ATTR(fifo_batch),
 	DD_ATTR(writes_starved),
-  DD_ATTR(sleep_latency_multiple),
-	__ATTR_NULL
+        DD_ATTR(sleep_latency_multiple),
+        __ATTR_NULL
 };
 
 static struct elevator_type iosched_maple = {
@@ -431,6 +432,8 @@ static void __exit maple_exit(void)
 module_init(maple_init);
 module_exit(maple_exit);
 
+MODULE_AUTHOR("Brandon Berhent");
+MODULE_AUTHOR("TripNRaVeR");
 MODULE_AUTHOR("Joe Maples");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Maple I/O Scheduler");
