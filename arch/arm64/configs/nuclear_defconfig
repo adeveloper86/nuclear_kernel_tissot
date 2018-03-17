@@ -60,7 +60,7 @@ CONFIG_AUDIT_WATCH=y
 CONFIG_AUDIT_TREE=y
 
 
-#Nuclear Kernel Tweaks
+########Nuclear Kernel Tweaks########
 
 #SoundControl
 CONFIG_SOUND_CONTROL=y
@@ -77,6 +77,10 @@ CONFIG_ADRENO_IDLER=y
 
 
 
+#Hotpluggers
+CONFIG_ASMP=y
+
+#Governors
 
 #
 # IRQ subsystem
@@ -4604,4 +4608,5 @@ CONFIG_QMI_ENCDEC=y
 # CONFIG_QMI_ENCDEC_DEBUG is not set
 CONFIG_BOOT_INFO=y
 # CONFIG_STRICT_MEMORY_RWX is not set
+
 
