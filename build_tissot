@@ -27,11 +27,12 @@ export CPUS=`nproc`
 echo "Setting Version Number"
 export VER=v$1
 echo "Setting Defconfig"
-export DEFCONFIG=tissot-perf_defconfig
-echo "Setting bzImage Location For FlareN kernel"
+export DEFCONFIG=nuclear_defconfig
+echo "Setting bzImage Location For Nuclear kernel"
 export BZIMAGE=gen/arch/arm64/boot/Image.gz-dtb
 echo "Enabling Graphite Optimizations"
 export ENABLE_GRAPHITE=true
+export EV=EXTRAVERSION=_Nuclear-O_v$1
 echo "Environment Setup Complete Now Moving To Compiling"
 echo ""
 echo ""
@@ -121,8 +122,8 @@ sleep $SLEEP
 echo "Copying bzImage"
 mv ../gen/arch/arm64/boot/Image.gz-dtb Image.gz-dtb
 sleep $SLEEP
-echo "Packing Flare-O_"$VER".zip"
-zip -r Flare-O_"$VER".zip *
+echo "Packing Nuclear-O_"$VER".zip"
+zip -r Nuclear-O_"$VER".zip *
 nowf=$(date +"%T")
 cd ..
 echo "Current Date : $NOW"

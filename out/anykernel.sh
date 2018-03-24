@@ -4,7 +4,7 @@
 ## AnyKernel setup
 # begin properties
 properties() {
-kernel.string=Flare-O
+kernel.string=Nuclear-O
 do.devicecheck=1
 do.modules=1
 do.cleanup=1
