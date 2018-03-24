@@ -101,7 +101,7 @@ else
    echo "-----------------------------------ERROR------------------------------------"
    echo "exiting script"
    sleep $SLEEP
-   exit 0
+   
 fi
 
 clear
