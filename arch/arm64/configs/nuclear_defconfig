@@ -80,6 +80,9 @@ CONFIG_ADRENO_IDLER=y
 #Hotpluggers
 CONFIG_ASMP=y
 
+#Governors
+CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+
 
 #
 # IRQ subsystem
