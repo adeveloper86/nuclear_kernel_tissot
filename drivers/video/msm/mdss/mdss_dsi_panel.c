@@ -1114,6 +1114,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds, CMD_REQ_COMMIT);
 
 	mdss_dsi_panel_off_hdmi(ctrl, pinfo);
+	display_on = false;
 	if (ctrl->ds_registered && pinfo->is_pluggable) {
 		mdss_dba_utils_video_off(pinfo->dba_data);
 		mdss_dba_utils_hdcp_enable(pinfo->dba_data, false);
@@ -1142,7 +1143,7 @@ static int mdss_dsi_panel_low_power_config(struct mdss_panel_data *pdata,
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
+	display_on = true;
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
