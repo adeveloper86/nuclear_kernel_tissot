@@ -25,7 +25,7 @@ export SLEEP=1
 echo "Setting CPU Cores/Threads"
 export CPUS=`nproc`
 echo "Setting Version Number"
-export VER=v5
+export VER=v5.1
 echo "Setting Defconfig"
 export DEFCONFIG=nuclear_defconfig
 echo "Setting bzImage Location For Nuclear kernel"
