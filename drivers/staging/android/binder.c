@@ -3285,23 +3285,8 @@ static void binder_transaction(struct binder_proc *proc,
 	} else {
 		BUG_ON(target_node == NULL);
 		BUG_ON(t->buffer->async_transaction != 1);
-		if (target_node->has_async_transaction) {
-			target_list = &target_node->async_todo;
-			target_wait = NULL;
-		} else
-			target_node->has_async_transaction = 1;
-	}
-	t->work.type = BINDER_WORK_TRANSACTION;
-	list_add_tail(&t->work.entry, target_list);
-	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
-	list_add_tail(&tcomplete->entry, &thread->todo);
-	if (target_wait) {
-		if (reply || !(t->flags & TF_ONE_WAY)) {
-			wake_up_interruptible_sync(target_wait);
-		}
-		else {
-			wake_up_interruptible(target_wait);
-		}
+		if (!binder_proc_transaction(t, target_proc, NULL))
+			goto err_dead_proc_or_thread;
 	}
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
